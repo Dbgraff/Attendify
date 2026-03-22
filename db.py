@@ -38,6 +38,38 @@ def init_db():
             CREATE TABLE IF NOT EXISTS metadata (
                 key TEXT PRIMARY KEY,
                 value TEXT
+            )
+            -- users (опционально, для входа преподавателей)
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                full_name TEXT,
+                role TEXT DEFAULT 'teacher'
+            );
+
+            -- students (студенты группы)
+            CREATE TABLE IF NOT EXISTS students (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_id INTEGER NOT NULL,
+                full_name TEXT NOT NULL,
+                is_active INTEGER DEFAULT 1,
+                notes TEXT,
+                FOREIGN KEY (group_id) REFERENCES groups(id)
+            );
+
+            -- attendance (отметки посещаемости)
+            CREATE TABLE IF NOT EXISTS attendance (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                lesson_id TEXT NOT NULL,        -- ссылается на lessons.id (текстовый ID из парсера)
+                student_id INTEGER NOT NULL,
+                status TEXT CHECK(status IN ('present', 'late', 'absent', 'excused')),
+                marked_by INTEGER,              -- кто отметил (id из users)
+                marked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (lesson_id) REFERENCES lessons(id),
+                FOREIGN KEY (student_id) REFERENCES students(id),
+                FOREIGN KEY (marked_by) REFERENCES users(id),
+                UNIQUE(lesson_id, student_id)
             );
         """)
 

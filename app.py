@@ -61,7 +61,7 @@ def get_schedule():
 
     with get_connection() as conn:
         cur = conn.execute("""
-            SELECT l.date, l.para, l.podgr, l.zam, t.name, d.name, l.room
+            SELECT l.id, l.date, l.para, l.podgr, l.zam, t.name, d.name, l.room
             FROM lessons l
             JOIN groups g ON l.group_id = g.id
             LEFT JOIN teachers t ON l.teacher_id = t.id
@@ -73,6 +73,7 @@ def get_schedule():
         schedule = []
         for row in rows:
             schedule.append({
+                "id": row[0],
                 "date": row[0],
                 "para": row[1],
                 "podgr": row[2],
@@ -108,7 +109,7 @@ def get_week_schedule():
 
     with get_connection() as conn:
         cur = conn.execute("""
-            SELECT l.date, l.para, l.podgr, l.zam, t.name, d.name, l.room
+            SELECT l.id, l.date, l.para, l.podgr, l.zam, t.name, d.name, l.room
             FROM lessons l
             JOIN groups g ON l.group_id = g.id
             LEFT JOIN teachers t ON l.teacher_id = t.id
@@ -122,6 +123,7 @@ def get_week_schedule():
     schedule_by_day = {d: [] for d in dates}
     for row in rows:
         schedule_by_day[row[0]].append({
+            "id": row[0],
             "para": row[1],
             "podgr": row[2],
             "zam": bool(row[3]),
@@ -165,6 +167,112 @@ def trigger_update():
     thread = threading.Thread(target=update)
     thread.start()
     return jsonify({"status": "Обновление запущено в фоне"}), 202
+
+@app.route('/students', methods=['GET'])
+def get_students():
+    group_code = request.args.get('group')
+    if not group_code:
+        return jsonify({'error': 'group param required'}), 400
+
+    with get_connection() as conn:
+        # получаем group_id по коду
+        cur = conn.execute("SELECT id FROM groups WHERE code = ?", (group_code,))
+        group_row = cur.fetchone()
+        if not group_row:
+            return jsonify([])   # группа не найдена
+
+        cur = conn.execute("""
+            SELECT id, full_name, is_active, notes
+            FROM students
+            WHERE group_id = ?
+            ORDER BY full_name
+        """, (group_row[0],))
+        students = [{'id': row[0], 'full_name': row[1], 'is_active': bool(row[2]), 'notes': row[3]} for row in cur.fetchall()]
+        return jsonify(students)
+
+@app.route('/students', methods=['POST'])
+def add_student():
+    data = request.json
+    group_code = data.get('group')
+    full_name = data.get('full_name')
+    if not group_code or not full_name:
+        return jsonify({'error': 'group and full_name required'}), 400
+
+    with get_connection() as conn:
+        cur = conn.execute("SELECT id FROM groups WHERE code = ?", (group_code,))
+        group_row = cur.fetchone()
+        if not group_row:
+            return jsonify({'error': 'Group not found'}), 404
+
+        # вставка
+        cur = conn.execute("""
+            INSERT INTO students (group_id, full_name, is_active, notes)
+            VALUES (?, ?, 1, ?)
+            RETURNING id
+        """, (group_row[0], full_name, data.get('notes', '')))
+        student_id = cur.fetchone()[0]
+        conn.commit()
+        return jsonify({'id': student_id}), 201
+
+@app.route('/students/<int:student_id>', methods=['PUT'])
+def update_student(student_id):
+    data = request.json
+    with get_connection() as conn:
+        conn.execute("""
+            UPDATE students
+            SET full_name = COALESCE(?, full_name),
+                is_active = COALESCE(?, is_active),
+                notes = COALESCE(?, notes)
+            WHERE id = ?
+        """, (data.get('full_name'), data.get('is_active'), data.get('notes'), student_id))
+        conn.commit()
+        return jsonify({'success': True})
+
+@app.route('/students/<int:student_id>', methods=['DELETE'])
+def delete_student(student_id):
+    with get_connection() as conn:
+        conn.execute("DELETE FROM students WHERE id = ?", (student_id,))
+        conn.execute("DELETE FROM attendance WHERE student_id = ?", (student_id,))
+        conn.commit()
+        return jsonify({'success': True})
+    
+
+@app.route('/attendance', methods=['GET'])
+def get_attendance():
+    lesson_id = request.args.get('lesson_id')
+    if not lesson_id:
+        return jsonify({'error': 'lesson_id required'}), 400
+
+    with get_connection() as conn:
+        cur = conn.execute("""
+            SELECT a.student_id, a.status, a.marked_at, s.full_name
+            FROM attendance a
+            JOIN students s ON a.student_id = s.id
+            WHERE a.lesson_id = ?
+        """, (lesson_id,))
+        records = [{'student_id': row[0], 'status': row[1], 'marked_at': row[2], 'student_name': row[3]} for row in cur.fetchall()]
+        return jsonify(records)
+
+@app.route('/attendance', methods=['POST'])
+def set_attendance():
+    data = request.json
+    lesson_id = data.get('lesson_id')
+    student_id = data.get('student_id')
+    status = data.get('status')   # может быть null для удаления
+
+    if not lesson_id or not student_id:
+        return jsonify({'error': 'lesson_id and student_id required'}), 400
+
+    with get_connection() as conn:
+        if status is None:
+            conn.execute("DELETE FROM attendance WHERE lesson_id = ? AND student_id = ?", (lesson_id, student_id))
+        else:
+            conn.execute("""
+                INSERT OR REPLACE INTO attendance (lesson_id, student_id, status, marked_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            """, (lesson_id, student_id, status))
+        conn.commit()
+        return jsonify({'success': True})
 
 # ---------- Запуск ----------
 if __name__ == "__main__":
