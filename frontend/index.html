@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>Attendify — учёт посещаемости</title>
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Flatpickr (календарь) -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <!-- Наши стили -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Шапка -->
+        <header class="header">
+            <div class="header-content">
+                <div class="logo">
+                    <div class="logo-icon">
+                        <i class="fas fa-check-circle"></i>
+                    </div>
+                    <div class="logo-text">
+                        <h1>Attendify</h1>
+                        <span class="badge">v2.0</span>
+                    </div>
+                </div>
+                <div class="header-actions">
+                    <button id="groupBtn" class="btn btn-outline" title="Управление студентами">
+                        <i class="fas fa-users"></i>
+                        <span class="btn-text">Студенты</span>
+                    </button>
+                    <button id="reportBtn" class="btn btn-outline" title="Отчёты">
+                        <i class="fas fa-file-pdf"></i>
+                        <span class="btn-text">Отчёт</span>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Основной контент -->
+        <main class="main-content">
+            <!-- Левая панель -->
+            <aside class="sidebar">
+                <!-- Выбор группы -->
+                <div class="group-selector-card">
+                    <h3><i class="fas fa-graduation-cap"></i> Группа</h3>
+                    <select id="groupSelect" class="form-control">
+                        <option value="">Загрузка...</option>
+                    </select>
+                </div>
+
+                <!-- Календарь -->
+                <div class="date-picker-card">
+                    <h3><i class="far fa-calendar-alt"></i> Дата</h3>
+                    <input type="text" id="datePicker" placeholder="Выберите дату" readonly>
+                </div>
+
+                <!-- Статистика посещаемости -->
+                <div class="stats-card">
+                    <h3><i class="fas fa-chart-line"></i> Статистика</h3>
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <div class="stat-icon present">✅</div>
+                            <div class="stat-content">
+                                <div class="stat-value" id="totalPresent">0</div>
+                                <div class="stat-label">Присутствуют</div>
+                            </div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-icon late">⏰</div>
+                            <div class="stat-content">
+                                <div class="stat-value" id="totalLate">0</div>
+                                <div class="stat-label">Опоздали</div>
+                            </div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-icon excused">🏥</div>
+                            <div class="stat-content">
+                                <div class="stat-value" id="totalExcused">0</div>
+                                <div class="stat-label">По уважительной</div>
+                            </div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-icon absent">❌</div>
+                            <div class="stat-content">
+                                <div class="stat-value" id="totalAbsent">0</div>
+                                <div class="stat-label">Отсутствуют</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Правая область с карточками занятий -->
+            <div class="content-area">
+                <div class="cards-header">
+                    <h2 id="selectedDateText">Сегодня</h2>
+                    <span class="badge" id="cardsCount">0 пар</span>
+                </div>
+
+                <div id="cardsContainer" class="cards-container">
+                    <div class="empty-state" id="emptyState">
+                        <i class="far fa-calendar-times"></i>
+                        <p>Нет занятий на выбранную дату</p>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Футер -->
+        <footer class="footer">
+            <p>Attendify • Система учёта посещаемости</p>
+            <p class="footer-note">Данные синхронизированы с сервером</p>
+        </footer>
+    </div>
+
+    <!-- Контейнер для модальных окон -->
+    <div id="modalsContainer"></div>
+
+    <!-- Скрипты -->
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/ru.js"></script>
+    <script type="module" src="js/app.js"></script>
+</body>
+</html>

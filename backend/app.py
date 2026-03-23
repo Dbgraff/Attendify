@@ -3,8 +3,10 @@ import time
 from flask import Flask, jsonify, request
 from db import get_connection, init_db, get_last_processed_file, set_last_processed_file
 from update import process_file, full_update
+from flask_cors import CORS
 
 app = Flask(__name__)
+CORS(app, origins=["http://127.0.0.1:5500", "http://localhost:5500"])
 
 # Инициализация БД при старте
 init_db()
@@ -66,7 +68,7 @@ def get_schedule():
             JOIN groups g ON l.group_id = g.id
             LEFT JOIN teachers t ON l.teacher_id = t.id
             LEFT JOIN disciplines d ON l.discipline_id = d.id
-            WHERE g.code = ? AND l.date = ?
+            WHERE g.code = ? AND SUBSTR(l.date, 1, 10) = ?
             ORDER BY l.para, l.podgr
         """, (group, date))
         rows = cur.fetchall()
@@ -74,13 +76,13 @@ def get_schedule():
         for row in rows:
             schedule.append({
                 "id": row[0],
-                "date": row[0],
-                "para": row[1],
-                "podgr": row[2],
-                "zam": bool(row[3]),   # заменённое занятие?
-                "teacher": row[4],
-                "discipline": row[5],
-                "room": row[6] or ""
+                "date": row[1],
+                "para": row[2],
+                "podgr": row[3],
+                "zam": bool(row[4]),   # заменённое занятие?
+                "teacher": row[5] or "",
+                "discipline": row[6] or "",
+                "room": row[7] or ""
             })
         return jsonify(schedule)
 
@@ -114,24 +116,24 @@ def get_week_schedule():
             JOIN groups g ON l.group_id = g.id
             LEFT JOIN teachers t ON l.teacher_id = t.id
             LEFT JOIN disciplines d ON l.discipline_id = d.id
-            WHERE g.code = ? AND l.date IN ({})
+            WHERE g.code = ? AND SUBSTR(l.date,1,10) IN ({})
             ORDER BY l.date, l.para, l.podgr
         """.format(','.join(['?']*7)), (group, *dates))
         rows = cur.fetchall()
 
-    # Группируем по датам
-    schedule_by_day = {d: [] for d in dates}
-    for row in rows:
-        schedule_by_day[row[0]].append({
-            "id": row[0],
-            "para": row[1],
-            "podgr": row[2],
-            "zam": bool(row[3]),
-            "teacher": row[4],
-            "discipline": row[5],
-            "room": row[6] or ""
-        })
-    return jsonify(schedule_by_day)
+        # Группируем по датам
+        schedule_by_day = {d: [] for d in dates}
+        for row in rows:
+            schedule_by_day[row[1]].append({
+                "id": row[0],
+                "para": row[2],
+                "podgr": row[3],
+                "zam": bool(row[4]),
+                "teacher": row[5] or "",
+                "discipline": row[6] or "",
+                "room": row[7] or ""
+            })
+        return jsonify(schedule_by_day)
 
 @app.route("/groups", methods=["GET"])
 def list_groups():
@@ -235,7 +237,7 @@ def delete_student(student_id):
         conn.execute("DELETE FROM attendance WHERE student_id = ?", (student_id,))
         conn.commit()
         return jsonify({'success': True})
-    
+
 
 @app.route('/attendance', methods=['GET'])
 def get_attendance():
@@ -273,6 +275,14 @@ def set_attendance():
             """, (lesson_id, student_id, status))
         conn.commit()
         return jsonify({'success': True})
+
+
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    return response
 
 # ---------- Запуск ----------
 if __name__ == "__main__":

@@ -38,7 +38,7 @@ def init_db():
             CREATE TABLE IF NOT EXISTS metadata (
                 key TEXT PRIMARY KEY,
                 value TEXT
-            )
+            );
             -- users (опционально, для входа преподавателей)
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
