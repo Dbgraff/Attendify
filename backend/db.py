@@ -39,7 +39,6 @@ def init_db():
                 key TEXT PRIMARY KEY,
                 value TEXT
             );
-            -- users (опционально, для входа преподавателей)
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT UNIQUE NOT NULL,
@@ -48,30 +47,40 @@ def init_db():
                 role TEXT DEFAULT 'teacher'
             );
 
-            -- students (студенты группы)
+            -- students (студенты группы) с полем subgroup
             CREATE TABLE IF NOT EXISTS students (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 group_id INTEGER NOT NULL,
                 full_name TEXT NOT NULL,
                 is_active INTEGER DEFAULT 1,
                 notes TEXT,
+                subgroup INTEGER DEFAULT 0,   -- 0 = общая группа, 1 = первая подгруппа, 2 = вторая
                 FOREIGN KEY (group_id) REFERENCES groups(id)
             );
 
             -- attendance (отметки посещаемости)
             CREATE TABLE IF NOT EXISTS attendance (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                lesson_id TEXT NOT NULL,        -- ссылается на lessons.id (текстовый ID из парсера)
+                lesson_id TEXT NOT NULL,
                 student_id INTEGER NOT NULL,
                 status TEXT CHECK(status IN ('present', 'late', 'absent', 'excused')),
-                marked_by INTEGER,              -- кто отметил (id из users)
+                marked_by INTEGER,
                 marked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (lesson_id) REFERENCES lessons(id),
                 FOREIGN KEY (student_id) REFERENCES students(id),
                 FOREIGN KEY (marked_by) REFERENCES users(id),
                 UNIQUE(lesson_id, student_id)
             );
-        """)
+""")
+        # Миграция: добавляем столбец subgroup если его нет
+        try:
+            conn.execute("ALTER TABLE students ADD COLUMN subgroup INTEGER DEFAULT 0")
+            print("Добавлен столбец subgroup в таблицу students")
+        except sqlite3.OperationalError as e:
+            if "duplicate column name" not in str(e):
+                raise
+            # Столбец уже существует, это нормально
+            pass
 
 def upsert_group(code):
     with get_connection() as conn:

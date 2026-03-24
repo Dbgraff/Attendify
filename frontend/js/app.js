@@ -36,7 +36,6 @@ export class AttendanceApp {
                 option.textContent = group;
                 select.appendChild(option);
             });
-            // Загружаем последнюю выбранную группу из localStorage
             const lastGroup = localStorage.getItem('selectedGroup');
             if (lastGroup && groups.includes(lastGroup)) {
                 select.value = lastGroup;
@@ -85,11 +84,14 @@ export class AttendanceApp {
             return;
         }
 
-        // Для статистики нужно собрать отметки за все занятия на выбранную дату?
-        // Пока сделаем заглушку, можно посчитать по всем карточкам на текущую дату.
-        // Упростим: считаем по всем занятиям текущего дня, но для удобства используем текущую дату.
-        const date = this.calendar.getSelectedDate().toISOString().split('T')[0];
-        const lessons = await this.api.getSchedule(this.selectedGroup, date);
+        // Исправление даты: локальное формирование без UTC
+        const date = this.calendar.getSelectedDate();
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const dateStr = `${year}-${month}-${day}`;
+
+        const lessons = await this.api.getSchedule(this.selectedGroup, dateStr);
         let present = 0, late = 0, excused = 0, absent = 0;
         for (const lesson of lessons) {
             const attendance = await this.api.getAttendance(lesson.id);
@@ -118,7 +120,6 @@ export class AttendanceApp {
     }
 
     showNotification(message, type = 'info') {
-        // Простая реализация
         const notification = document.createElement('div');
         notification.className = `notification ${type}`;
         notification.innerHTML = `
@@ -130,7 +131,6 @@ export class AttendanceApp {
     }
 }
 
-// Запуск
 window.addEventListener('DOMContentLoaded', () => {
     window.app = new AttendanceApp();
 });

@@ -184,12 +184,12 @@ def get_students():
             return jsonify([])   # группа не найдена
 
         cur = conn.execute("""
-            SELECT id, full_name, is_active, notes
+            SELECT id, full_name, is_active, notes, subgroup
             FROM students
             WHERE group_id = ?
             ORDER BY full_name
         """, (group_row[0],))
-        students = [{'id': row[0], 'full_name': row[1], 'is_active': bool(row[2]), 'notes': row[3]} for row in cur.fetchall()]
+        students = [{'id': row[0], 'full_name': row[1], 'is_active': bool(row[2]), 'notes': row[3], 'subgroup': row[4]} for row in cur.fetchall()]
         return jsonify(students)
 
 @app.route('/students', methods=['POST'])
@@ -207,11 +207,12 @@ def add_student():
             return jsonify({'error': 'Group not found'}), 404
 
         # вставка
+        subgroup = data.get('subgroup', 0)
         cur = conn.execute("""
-            INSERT INTO students (group_id, full_name, is_active, notes)
-            VALUES (?, ?, 1, ?)
+            INSERT INTO students (group_id, full_name, is_active, notes, subgroup)
+            VALUES (?, ?, 1, ?, ?)
             RETURNING id
-        """, (group_row[0], full_name, data.get('notes', '')))
+        """, (group_row[0], full_name, data.get('notes', ''), subgroup))
         student_id = cur.fetchone()[0]
         conn.commit()
         return jsonify({'id': student_id}), 201
@@ -224,9 +225,10 @@ def update_student(student_id):
             UPDATE students
             SET full_name = COALESCE(?, full_name),
                 is_active = COALESCE(?, is_active),
-                notes = COALESCE(?, notes)
+                notes = COALESCE(?, notes),
+                subgroup = COALESCE(?, subgroup)
             WHERE id = ?
-        """, (data.get('full_name'), data.get('is_active'), data.get('notes'), student_id))
+        """, (data.get('full_name'), data.get('is_active'), data.get('notes'), data.get('subgroup'), student_id))
         conn.commit()
         return jsonify({'success': True})
 
@@ -237,7 +239,6 @@ def delete_student(student_id):
         conn.execute("DELETE FROM attendance WHERE student_id = ?", (student_id,))
         conn.commit()
         return jsonify({'success': True})
-
 
 @app.route('/attendance', methods=['GET'])
 def get_attendance():
@@ -260,12 +261,32 @@ def set_attendance():
     data = request.json
     lesson_id = data.get('lesson_id')
     student_id = data.get('student_id')
-    status = data.get('status')   # может быть null для удаления
+    status = data.get('status')  # может быть null для удаления
 
     if not lesson_id or not student_id:
         return jsonify({'error': 'lesson_id and student_id required'}), 400
 
     with get_connection() as conn:
+        # Получаем подгруппу занятия
+        cur = conn.execute("SELECT podgr FROM lessons WHERE id = ?", (lesson_id,))
+        lesson_row = cur.fetchone()
+        if not lesson_row:
+            return jsonify({'error': 'Lesson not found'}), 404
+        lesson_podgr = lesson_row[0] or 0
+
+        # Получаем подгруппу студента
+        cur = conn.execute("SELECT subgroup FROM students WHERE id = ?", (student_id,))
+        student_row = cur.fetchone()
+        if not student_row:
+            return jsonify({'error': 'Student not found'}), 404
+        student_subgroup = student_row[0] or 0
+
+        # Проверка соответствия подгрупп
+        # lesson_podgr: 0 - общее занятие, 1 - первая подгруппа, 2 - вторая подгруппа
+        # student_subgroup: 0 - общая группа, 1 - первая подгруппа, 2 - вторая подгруппа
+        if lesson_podgr != 0 and student_subgroup != 0 and lesson_podgr != student_subgroup:
+            return jsonify({'error': f'Student belongs to subgroup {student_subgroup}, but lesson is for subgroup {lesson_podgr}'}), 400
+
         if status is None:
             conn.execute("DELETE FROM attendance WHERE lesson_id = ? AND student_id = ?", (lesson_id, student_id))
         else:
@@ -275,7 +296,6 @@ def set_attendance():
             """, (lesson_id, student_id, status))
         conn.commit()
         return jsonify({'success': True})
-
 
 @app.after_request
 def after_request(response):

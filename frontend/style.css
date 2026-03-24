@@ -569,3 +569,10 @@ body {
 .status-btn:hover {
     transform: scale(1.05);
 }
+.card-para {
+    background: var(--gray-100);
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-weight: 500;
+    color: var(--primary-dark);
+}

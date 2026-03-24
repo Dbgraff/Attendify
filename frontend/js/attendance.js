@@ -11,11 +11,17 @@ export class AttendanceManager {
         this.currentLessonId = lessonId;
         this.currentLesson = lesson;
 
-        // Загружаем студентов и текущие отметки
         const students = this.app.students;
+        // NEW: фильтруем студентов по подгруппе занятия
+        let filteredStudents = students;
+        if (lesson.podgr === 1) {
+            filteredStudents = students.filter(s => s.subgroup === 1);
+        } else if (lesson.podgr === 2) {
+            filteredStudents = students.filter(s => s.subgroup === 2);
+        } // podgr === 0 – все
+
         const attendance = await this.app.api.getAttendance(lessonId);
 
-        // Создаём HTML модалки
         const modalHtml = `
             <div class="modal-overlay" id="attendanceModal">
                 <div class="modal">
@@ -28,6 +34,8 @@ export class AttendanceManager {
                             <div><i class="fas fa-user-tie"></i> ${Utils.escapeHtml(lesson.teacher)}</div>
                             <div><i class="fas fa-map-marker-alt"></i> ${Utils.escapeHtml(lesson.room)}</div>
                             <div><i class="far fa-clock"></i> ${Utils.escapeHtml(lesson.time || '')}</div>
+                            ${lesson.para ? `<div><i class="fas fa-sort-numeric-up"></i> ${lesson.para} пара</div>` : ''}
+                            ${lesson.podgr ? `<div><i class="fas fa-users"></i> Подгруппа ${lesson.podgr}</div>` : ''}
                         </div>
 
                         <div class="attendance-stats" id="modalStats"></div>
@@ -57,11 +65,9 @@ export class AttendanceManager {
         closeBtn.addEventListener('click', closeModal);
         closeModalBtn.addEventListener('click', closeModal);
 
-        // Рендерим статистику и список студентов
-        await this.renderAttendanceStats(attendance, students);
-        await this.renderStudentList(students, attendance);
+        await this.renderAttendanceStats(attendance, filteredStudents);
+        await this.renderStudentList(filteredStudents, attendance);
 
-        // Обработчики для кнопок статусов
         modal.addEventListener('click', async (e) => {
             const btn = e.target.closest('.status-btn');
             if (!btn) return;
@@ -70,16 +76,13 @@ export class AttendanceManager {
             const status = btn.dataset.status;
             const currentStatus = attendance.find(a => a.student_id == studentId)?.status;
 
-            // Если уже выбран этот статус — сбрасываем (null)
             const newStatus = (currentStatus === status) ? null : status;
 
             try {
                 await this.app.api.setAttendance(this.currentLessonId, studentId, newStatus);
-                // Обновляем данные и перерисовываем
                 const newAttendance = await this.app.api.getAttendance(this.currentLessonId);
-                await this.renderAttendanceStats(newAttendance, students);
-                await this.renderStudentList(students, newAttendance);
-                // Обновляем карточку на главной
+                await this.renderAttendanceStats(newAttendance, filteredStudents);
+                await this.renderStudentList(filteredStudents, newAttendance);
                 this.app.refreshSchedule();
             } catch (err) {
                 console.error('Error saving attendance:', err);
@@ -111,7 +114,7 @@ export class AttendanceManager {
         if (!container) return;
 
         if (!students.length) {
-            container.innerHTML = '<p class="empty-state">Нет студентов в группе</p>';
+            container.innerHTML = '<p class="empty-state">Нет студентов в этой подгруппе</p>';
             return;
         }
 

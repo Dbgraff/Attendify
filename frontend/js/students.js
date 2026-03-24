@@ -24,7 +24,12 @@ export class StudentsManager {
                     <div class="modal-body">
                         <div class="add-student">
                             <input type="text" id="newStudentName" placeholder="ФИО нового студента" class="form-control">
-                            <button id="addStudentBtn" class="btn btn-primary">Добавить</button>
+                            <select id="newStudentSubgroup" class="form-control" style="margin-top: 8px;">
+                                <option value="0">Общая группа</option>
+                                <option value="1">Первая подгруппа</option>
+                                <option value="2">Вторая подгруппа</option>
+                            </select>
+                            <button id="addStudentBtn" class="btn btn-primary" style="margin-top: 8px;">Добавить</button>
                         </div>
                         <div class="students-list" id="studentsListModal"></div>
                     </div>
@@ -54,10 +59,11 @@ export class StudentsManager {
             for (const student of students) {
                 const row = document.createElement('div');
                 row.className = 'student-row';
+                const subgroupText = student.subgroup === 0 ? 'Общая' : (student.subgroup === 1 ? '1-я подгр.' : '2-я подгр.');
                 row.innerHTML = `
                     <div class="student-info">
                         <strong>${Utils.escapeHtml(student.full_name)}</strong>
-                        ${student.notes ? `<div class="student-notes">${Utils.escapeHtml(student.notes)}</div>` : ''}
+                        <div class="student-notes">${subgroupText}${student.notes ? ` • ${Utils.escapeHtml(student.notes)}` : ''}</div>
                     </div>
                     <div class="student-actions">
                         <button class="btn btn-sm btn-outline edit-student" data-id="${student.id}">✏️</button>
@@ -78,6 +84,14 @@ export class StudentsManager {
                         await this.app.refreshStudents();
                         renderStudents();
                         this.app.showNotification('Студент обновлён', 'success');
+                    }
+                    // NEW: возможность изменить подгруппу
+                    const newSubgroup = prompt('Номер подгруппы (0 - общая, 1 - первая, 2 - вторая):', student.subgroup);
+                    if (newSubgroup !== null && parseInt(newSubgroup) !== student.subgroup) {
+                        await this.app.api.updateStudent(id, { subgroup: parseInt(newSubgroup) });
+                        await this.app.refreshStudents();
+                        renderStudents();
+                        this.app.showNotification('Подгруппа обновлена', 'success');
                     }
                 });
             });
@@ -100,15 +114,18 @@ export class StudentsManager {
         // Добавление студента
         const addBtn = document.getElementById('addStudentBtn');
         const nameInput = document.getElementById('newStudentName');
+        const subgroupSelect = document.getElementById('newStudentSubgroup');
         addBtn.addEventListener('click', async () => {
             const name = nameInput.value.trim();
             if (!name) {
                 this.app.showNotification('Введите ФИО', 'warning');
                 return;
             }
-            await this.app.api.addStudent(group, name);
+            const subgroup = parseInt(subgroupSelect.value);
+            await this.app.api.addStudent(group, name, '', subgroup);
             await this.app.refreshStudents();
             nameInput.value = '';
+            subgroupSelect.value = '0';
             renderStudents();
             this.app.showNotification('Студент добавлен', 'success');
         });

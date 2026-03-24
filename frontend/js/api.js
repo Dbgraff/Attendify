@@ -14,11 +14,11 @@ export const api = {
         if (!res.ok) throw new Error('Failed to fetch students');
         return res.json();
     },
-    async addStudent(groupCode, fullName, notes = '') {
+async addStudent(groupCode, fullName, notes = '', subgroup = 0) {
         const res = await fetch(`${API_BASE}/students`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ group: groupCode, full_name: fullName, notes })
+            body: JSON.stringify({ group: groupCode, full_name: fullName, notes, subgroup })
         });
         if (!res.ok) throw new Error('Failed to add student');
         return res.json();

@@ -12,12 +12,15 @@ export class CardsManager {
 
         const group = this.app.selectedGroup;
         const date = this.app.calendar.getSelectedDate();
-        const dateStr = date.toISOString().split('T')[0];
+
+        // NEW: формируем локальную дату YYYY-MM-DD без UTC
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const dateStr = `${year}-${month}-${day}`;
 
         if (!group) {
-            // Если группы нет, показываем emptyState
             if (emptyState) emptyState.style.display = 'flex';
-            // Очищаем все карточки, но сохраняем emptyState
             Array.from(container.children).forEach(child => {
                 if (child !== emptyState) child.remove();
             });
@@ -31,27 +34,33 @@ export class CardsManager {
 
             if (lessons.length === 0) {
                 if (emptyState) emptyState.style.display = 'flex';
-                // Удаляем все лишние элементы, кроме emptyState
                 Array.from(container.children).forEach(child => {
                     if (child !== emptyState) child.remove();
                 });
                 return;
             }
 
-            // Скрываем emptyState
             if (emptyState) emptyState.style.display = 'none';
-
-            // Удаляем все элементы, кроме emptyState
             Array.from(container.children).forEach(child => {
                 if (child !== emptyState) child.remove();
             });
 
-            // Добавляем карточки
             for (const lesson of lessons) {
                 const attendance = await this.app.api.getAttendance(lesson.id);
                 const students = this.app.students;
-                const total = students.length;
-                const presentCount = attendance.filter(a => a.status === 'present').length;
+                // Фильтруем студентов по подгруппе занятия
+                let filteredStudents = students;
+                if (lesson.podgr === 1) {
+                    filteredStudents = students.filter(s => s.subgroup === 1);
+                } else if (lesson.podgr === 2) {
+                    filteredStudents = students.filter(s => s.subgroup === 2);
+                } // podgr === 0 – все студенты
+
+                const total = filteredStudents.length;
+                const presentCount = attendance.filter(a => {
+                    const student = filteredStudents.find(s => s.id === a.student_id);
+                    return student && a.status === 'present';
+                }).length;
                 const percent = total ? Math.round(presentCount / total * 100) : 0;
                 let attendanceClass = '';
                 if (percent >= 80) attendanceClass = 'attendance-good';
@@ -61,10 +70,15 @@ export class CardsManager {
                 const card = document.createElement('div');
                 card.className = 'card';
                 card.dataset.id = lesson.id;
+                // NEW: добавляем номер пары
+                const paraText = lesson.para ? `${lesson.para} пара` : '';
                 card.innerHTML = `
                 <div class="card-header">
                     <div class="card-title">${Utils.escapeHtml(lesson.discipline)}</div>
-                    <div class="card-time"><i class="far fa-clock"></i> ${Utils.escapeHtml(lesson.time || '')}</div>
+                    <div class="card-time">
+                        ${paraText ? `<span class="card-para">${paraText}</span>` : ''}
+                        ${lesson.time ? `<i class="far fa-clock"></i> ${Utils.escapeHtml(lesson.time)}` : ''}
+                    </div>
                 </div>
                 <div class="card-details">
                     <div class="card-detail"><i class="fas fa-user-tie"></i> ${Utils.escapeHtml(lesson.teacher)}</div>
