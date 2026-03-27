@@ -148,6 +148,43 @@ export const api = {
     async deleteUser(userId) {
         const res = await fetchWithAuth(`${API_BASE}/users/${userId}`, { method: 'DELETE' });
         if (!res.ok) throw new Error('Failed to delete user');
-        return res.json();
+        return res.json()
+    },
+
+    async downloadReport(groupCode, startDate, endDate, format) {
+        const params = new URLSearchParams({
+            group_code: groupCode,
+            start_date: startDate,
+            end_date: endDate,
+            format: format
+        });
+        const url = `${API_BASE}/report?${params.toString()}`;
+        const response = await fetchWithAuth(url, {
+            method: 'GET',
+            headers: {
+                'Accept': format === 'pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            }
+        });
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Failed to generate report: ${errorText}`);
+        }
+        const blob = await response.blob();
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        const contentDisposition = response.headers.get('Content-Disposition');
+        let filename = `report_${groupCode}_${startDate}_${endDate}.${format}`;
+        if (contentDisposition) {
+            const match = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+            if (match && match[1]) {
+                filename = match[1].replace(/['"]/g, '');
+            }
+        }
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(downloadUrl);
     }
 };

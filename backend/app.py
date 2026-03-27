@@ -2,12 +2,15 @@ import sqlite3
 import threading
 import time
 import os
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_file
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 from werkzeug.security import generate_password_hash, check_password_hash
 from db import add_curator_group, get_available_groups, get_connection, get_curator_groups, get_group_code_by_id, init_db, get_last_processed_file, set_last_processed_file, get_user_by_username, user_has_group_access, remove_curator_groups
 from update import process_file, full_update
 from flask_cors import CORS
+import io
+from datetime import datetime
+from report_generator import generate_excel_report, generate_pdf_report
 
 app = Flask(__name__)
 app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'xUFXVEhR0vRg1ZISBWMVZdnI3E8Vg32Zx8X2bESaVGn')
@@ -711,6 +714,144 @@ def delete_user(user_id):
         conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
         conn.commit()
         return jsonify({'success': True})
+    
+@app.route('/report', methods=['GET'])
+@jwt_required()
+def generate_report():
+    """
+    Query parameters:
+        group_code: str
+        start_date: YYYY-MM-DD
+        end_date: YYYY-MM-DD
+        format: 'xlsx' or 'pdf'
+    """
+    group_code = request.args.get('group_code')
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    fmt = request.args.get('format', 'xlsx').lower()
+    if not group_code or not start_date or not end_date:
+        return jsonify({'error': 'group_code, start_date, end_date required'}), 400
+
+    # Validate dates
+    try:
+        datetime.strptime(start_date, '%Y-%m-%d')
+        datetime.strptime(end_date, '%Y-%m-%d')
+    except ValueError:
+        return jsonify({'error': 'Invalid date format, use YYYY-MM-DD'}), 400
+
+    user_id = int(get_jwt_identity())
+    with get_connection() as conn:
+        # Check permissions: only headman or curator can generate reports
+        cur = conn.execute("SELECT role FROM users WHERE id = ?", (user_id,))
+        role = cur.fetchone()[0]
+        if role not in ('headman', 'curator'):
+            return jsonify({'error': 'Only headman and curator can generate reports'}), 403
+
+        # Check group access
+        if not user_has_group_access(user_id, group_code):
+            return jsonify({'error': 'Access denied to this group'}), 403
+
+        # Get group id
+        cur = conn.execute("SELECT id FROM groups WHERE code = ?", (group_code,))
+        group_row = cur.fetchone()
+        if not group_row:
+            return jsonify({'error': 'Group not found'}), 404
+        group_id = group_row[0]
+
+        # Get all students in group
+        cur = conn.execute("""
+            SELECT id, full_name, subgroup
+            FROM students
+            WHERE group_id = ? AND is_active = 1
+            ORDER BY full_name
+        """, (group_id,))
+        students = [{'id': row[0], 'full_name': row[1], 'subgroup': row[2] or 0} for row in cur.fetchall()]
+
+        # Get all lessons for group in date range
+        cur = conn.execute("""
+            SELECT id, podgr
+            FROM lessons
+            WHERE group_id = ? AND date BETWEEN ? AND ?
+        """, (group_id, start_date, end_date))
+        lessons = [{'id': row[0], 'podgr': row[1] or 0} for row in cur.fetchall()]
+
+        # Get all attendance records for these lessons and students
+        if not lessons or not students:
+            data = []
+            for s in students:
+                data.append({
+                    'full_name': s['full_name'],
+                    'subgroup': 'Общая' if s['subgroup'] == 0 else f"{s['subgroup']}-я подгр.",
+                    'present': 0, 'late': 0, 'excused': 0, 'absent': 0,
+                    'total': 0, 'percent': 0
+                })
+        else:
+            lesson_ids = [l['id'] for l in lessons]
+            placeholders = ','.join('?' for _ in lesson_ids)
+            cur = conn.execute(f"""
+                SELECT lesson_id, student_id, status
+                FROM attendance
+                WHERE lesson_id IN ({placeholders})
+            """, lesson_ids)
+            attendance_records = {}
+            for row in cur.fetchall():
+                lesson_id = row[0]
+                student_id = row[1]
+                status = row[2]
+                if student_id not in attendance_records:
+                    attendance_records[student_id] = {}
+                attendance_records[student_id][lesson_id] = status
+
+            data = []
+            for student in students:
+                present = late = excused = absent = 0
+                total_lessons = 0
+                for lesson in lessons:
+                    if lesson['podgr'] == 0:
+                        eligible = True
+                    else:
+                        eligible = (student['subgroup'] == lesson['podgr'])
+                    if not eligible:
+                        continue
+                    total_lessons += 1
+                    status = attendance_records.get(student['id'], {}).get(lesson['id'])
+                    if status == 'present':
+                        present += 1
+                    elif status == 'late':
+                        late += 1
+                    elif status == 'excused':
+                        excused += 1
+                    else:
+                        absent += 1
+                percent = (present + late + excused) * 100 / total_lessons if total_lessons > 0 else 0
+                data.append({
+                    'full_name': student['full_name'],
+                    'subgroup': 'Общая' if student['subgroup'] == 0 else f"{student['subgroup']}-я подгр.",
+                    'present': present,
+                    'late': late,
+                    'excused': excused,
+                    'absent': absent,
+                    'total': total_lessons,
+                    'percent': round(percent, 1)
+                })
+
+    # Generate file
+    try:
+        if fmt == 'xlsx':
+            excel_data = generate_excel_report(data, group_code, start_date, end_date)
+            filename = f"report_{group_code}_{start_date}_{end_date}.xlsx"
+            mimetype = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            return send_file(excel_data, download_name=filename, as_attachment=True, mimetype=mimetype)
+        elif fmt == 'pdf':
+            pdf_data = generate_pdf_report(data, group_code, start_date, end_date)
+            filename = f"report_{group_code}_{start_date}_{end_date}.pdf"
+            return send_file(pdf_data, download_name=filename, as_attachment=True, mimetype='application/pdf')
+        else:
+            return jsonify({'error': 'Format must be xlsx or pdf'}), 400
+    except Exception as e:
+        # Если произошла ошибка при генерации (например, шрифт не найден)
+        app.logger.error(f"Report generation error: {e}")
+        return jsonify({'error': f'Ошибка генерации отчета: {str(e)}'}), 500
 
 # В конце оставляем CORS и запуск
 if __name__ == "__main__":

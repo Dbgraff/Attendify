@@ -26,11 +26,9 @@ export class AttendanceApp {
     }
 
     async init() {
-
         window.addEventListener('beforeunload', () => {
             console.warn('[App] Page is about to unload');
-            // можно добавить стек вызовов, но beforeunload не даёт сохранить много данных
-        })
+        });
         const token = localStorage.getItem('access_token');
         if (token) {
             try {
@@ -47,8 +45,6 @@ export class AttendanceApp {
         } else {
             this.showLogin();
         }
-
-
     }
 
     showLogin() {
@@ -143,7 +139,7 @@ export class AttendanceApp {
         try {
             this.students = await this.api.getStudents(this.selectedGroup);
             try {
-                await this.updateStats();   // <-- добавлен await
+                await this.updateStats();
             } catch (statsErr) {
                 console.error('Ошибка при обновлении статистики:', statsErr);
                 document.getElementById('totalPresent').textContent = '0';
@@ -206,7 +202,7 @@ export class AttendanceApp {
             document.getElementById('totalAbsent').textContent = absent;
         } catch (err) {
             console.error('Error updating stats:', err);
-            throw err; // Можно пробросить, если нужно обработать выше
+            throw err;
         }
     }
 
@@ -215,7 +211,7 @@ export class AttendanceApp {
             this.studentsManager.showModal();
         });
         document.getElementById('reportBtn').addEventListener('click', () => {
-            this.showNotification('Функция отчётов в разработке', 'info');
+            this.showReportModal();
         });
 
         const logoutBtn = document.createElement('button');
@@ -250,6 +246,140 @@ export class AttendanceApp {
         `;
         document.body.appendChild(notification);
         setTimeout(() => notification.remove(), 3000);
+    }
+
+    showReportModal() {
+        const modalHtml = `
+            <div class="modal-overlay" id="reportModal">
+                <div class="modal">
+                    <div class="modal-header">
+                        <h2 class="modal-title">Генерация отчета</h2>
+                        <button class="modal-close">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label>Период:</label>
+                            <div class="period-buttons" style="display: flex; gap: 8px; margin-bottom: 12px;">
+                                <button id="periodWeek" class="btn btn-sm btn-outline">Эта неделя</button>
+                                <button id="periodMonth" class="btn btn-sm btn-outline">Этот месяц</button>
+                                <button id="periodCustom" class="btn btn-sm btn-outline">Произвольный</button>
+                            </div>
+                            <div id="customDates" style="display: none;">
+                                <input type="text" id="startDate" placeholder="Начало" class="form-control" readonly>
+                                <input type="text" id="endDate" placeholder="Конец" class="form-control" style="margin-top: 8px;" readonly>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Формат:</label>
+                            <select id="reportFormat" class="form-control">
+                                <option value="xlsx">Excel (.xlsx)</option>
+                                <option value="pdf">PDF (.pdf)</option>
+                            </select>
+                        </div>
+                        <div id="reportError" style="color: red; margin-top: 8px;"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button id="generateReportBtn" class="btn btn-primary">Сформировать</button>
+                        <button id="closeReportBtn" class="btn btn-secondary">Отмена</button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        const container = document.getElementById('modalsContainer');
+        container.innerHTML = modalHtml;
+
+        const modal = document.getElementById('reportModal');
+        const closeModal = () => modal.remove();
+
+        modal.querySelector('.modal-close').addEventListener('click', closeModal);
+        document.getElementById('closeReportBtn').addEventListener('click', closeModal);
+
+        // Date pickers
+        const startInput = document.getElementById('startDate');
+        const endInput = document.getElementById('endDate');
+        const customDiv = document.getElementById('customDates');
+
+        // Initialize flatpickr
+        const startPicker = flatpickr(startInput, { locale: 'ru', dateFormat: 'd.m.Y' });
+        const endPicker = flatpickr(endInput, { locale: 'ru', dateFormat: 'd.m.Y' });
+
+        // Set default week
+        const today = new Date();
+        const firstDayOfWeek = new Date(today);
+        const day = today.getDay();
+        const diffToMonday = (day === 0 ? 6 : day - 1);
+        firstDayOfWeek.setDate(today.getDate() - diffToMonday);
+        const lastDayOfWeek = new Date(firstDayOfWeek);
+        lastDayOfWeek.setDate(firstDayOfWeek.getDate() + 6);
+        startPicker.setDate(firstDayOfWeek);
+        endPicker.setDate(lastDayOfWeek);
+
+        // Period buttons
+        document.getElementById('periodWeek').addEventListener('click', () => {
+            customDiv.style.display = 'none';
+            // Calculate current week (Monday to Sunday)
+            const today = new Date();
+            const firstDay = new Date(today);
+            const day = today.getDay();
+            const diffToMonday = (day === 0 ? 6 : day - 1);
+            firstDay.setDate(today.getDate() - diffToMonday);
+            const lastDay = new Date(firstDay);
+            lastDay.setDate(firstDay.getDate() + 6);
+            startPicker.setDate(firstDay);
+            endPicker.setDate(lastDay);
+        });
+        document.getElementById('periodMonth').addEventListener('click', () => {
+            customDiv.style.display = 'none';
+            const today = new Date();
+            const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+            const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+            startPicker.setDate(firstDay);
+            endPicker.setDate(lastDay);
+        });
+        document.getElementById('periodCustom').addEventListener('click', () => {
+            customDiv.style.display = 'block';
+            // Optionally set some default dates
+            const today = new Date();
+            startPicker.setDate(today);
+            endPicker.setDate(today);
+        });
+
+        // Generate button
+        document.getElementById('generateReportBtn').addEventListener('click', async () => {
+            const format = document.getElementById('reportFormat').value;
+            let startDate = startInput.value;
+            let endDate = endInput.value;
+            if (!startDate || !endDate) {
+                document.getElementById('reportError').textContent = 'Выберите даты';
+                return;
+            }
+            // Convert from dd.mm.yyyy to yyyy-mm-dd
+            const parseDate = (d) => {
+                const parts = d.split('.');
+                if (parts.length === 3) {
+                    return `${parts[2]}-${parts[1]}-${parts[0]}`;
+                }
+                return d;
+            };
+            startDate = parseDate(startDate);
+            endDate = parseDate(endDate);
+
+            const groupCode = this.selectedGroup;
+            if (!groupCode) {
+                document.getElementById('reportError').textContent = 'Сначала выберите группу';
+                return;
+            }
+
+            try {
+                await this.api.downloadReport(groupCode, startDate, endDate, format);
+                closeModal();
+                this.showNotification('Отчет сформирован', 'success');
+            } catch (err) {
+                document.getElementById('reportError').textContent = err.message;
+                this.showNotification('Ошибка: ' + err.message, 'error');
+            }
+        });
     }
 }
 
