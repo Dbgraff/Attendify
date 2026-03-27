@@ -15,7 +15,6 @@
 </head>
 <body>
     <div class="app-container">
-        <!-- Шапка -->
         <header class="header">
             <div class="header-content">
                 <div class="logo">
@@ -40,11 +39,8 @@
             </div>
         </header>
 
-        <!-- Основной контент -->
         <main class="main-content">
-            <!-- Левая панель -->
             <aside class="sidebar">
-                <!-- Выбор группы -->
                 <div class="group-selector-card">
                     <h3><i class="fas fa-graduation-cap"></i> Группа</h3>
                     <select id="groupSelect" class="form-control">
@@ -52,13 +48,11 @@
                     </select>
                 </div>
 
-                <!-- Календарь -->
                 <div class="date-picker-card">
                     <h3><i class="far fa-calendar-alt"></i> Дата</h3>
-                    <input type="text" id="datePicker" placeholder="Выберите дату" readonly>
+                    <input type="text" id="datePicker" placeholder="Выберите дату" readonly class="form-control">
                 </div>
 
-                <!-- Статистика посещаемости -->
                 <div class="stats-card">
                     <h3><i class="fas fa-chart-line"></i> Статистика</h3>
                     <div class="stats-grid">
@@ -94,11 +88,17 @@
                 </div>
             </aside>
 
-            <!-- Правая область с карточками занятий -->
             <div class="content-area">
                 <div class="cards-header">
-                    <h2 id="selectedDateText">Сегодня</h2>
-                    <span class="badge" id="cardsCount">0 пар</span>
+                    <div class="cards-header-left">
+                        <h2 id="selectedDateText">Сегодня</h2>
+                        <span class="badge" id="cardsCount">0 пар</span>
+                    </div>
+                    <div class="cards-header-right">
+                        <button id="prevDayBtn" class="btn btn-sm btn-outline"><i class="fas fa-chevron-left"></i> Вчера</button>
+                        <button id="todayBtn" class="btn btn-sm btn-outline">Сегодня</button>
+                        <button id="nextDayBtn" class="btn btn-sm btn-outline">Завтра <i class="fas fa-chevron-right"></i></button>
+                    </div>
                 </div>
 
                 <div id="cardsContainer" class="cards-container">
@@ -110,17 +110,14 @@
             </div>
         </main>
 
-        <!-- Футер -->
         <footer class="footer">
             <p>Attendify • Система учёта посещаемости</p>
             <p class="footer-note">Данные синхронизированы с сервером</p>
         </footer>
     </div>
 
-    <!-- Контейнер для модальных окон -->
     <div id="modalsContainer"></div>
 
-    <!-- Скрипты -->
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/ru.js"></script>
     <script type="module" src="js/app.js"></script>

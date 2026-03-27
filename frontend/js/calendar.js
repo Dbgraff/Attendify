@@ -29,6 +29,30 @@ export class CalendarManager {
         });
 
         this.updateDateText();
+
+        const prevBtn = document.getElementById('prevDayBtn');
+        const todayBtn = document.getElementById('todayBtn');
+        const nextBtn = document.getElementById('nextDayBtn');
+
+        if (prevBtn) {
+            prevBtn.addEventListener('click', () => {
+                const newDate = new Date(this.selectedDate);
+                newDate.setDate(newDate.getDate() - 1);
+                this.setSelectedDate(newDate);
+            });
+        }
+        if (todayBtn) {
+            todayBtn.addEventListener('click', () => {
+                this.setSelectedDate(new Date());
+            });
+        }
+        if (nextBtn) {
+            nextBtn.addEventListener('click', () => {
+                const newDate = new Date(this.selectedDate);
+                newDate.setDate(newDate.getDate() + 1);
+                this.setSelectedDate(newDate);
+            });
+        }
     }
 
     updateDateText() {
@@ -53,5 +77,8 @@ export class CalendarManager {
             this.flatpickr.setDate(this.selectedDate);
         }
         this.updateDateText();
+        if (this.app && typeof this.app.refreshSchedule === 'function') {
+            this.app.refreshSchedule().catch(err => console.error('Error refreshing schedule:', err));
+        }
     }
 }
