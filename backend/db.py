@@ -3,7 +3,10 @@ import sqlite3
 DB_PATH = "schedule.db"
 
 def get_connection():
-    return sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=10)   # ждать до 10 сек
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    return conn
 
 def init_db():
     with get_connection() as conn:
@@ -44,21 +47,21 @@ def init_db():
                 username TEXT UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
                 full_name TEXT,
-                role TEXT DEFAULT 'teacher'
+                role TEXT DEFAULT 'teacher',
+                group_id INTEGER,
+                curator_group_id INTEGER,
+                FOREIGN KEY (group_id) REFERENCES groups(id),
+                FOREIGN KEY (curator_group_id) REFERENCES groups(id)
             );
-
-            -- students (студенты группы) с полем subgroup
             CREATE TABLE IF NOT EXISTS students (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 group_id INTEGER NOT NULL,
                 full_name TEXT NOT NULL,
                 is_active INTEGER DEFAULT 1,
                 notes TEXT,
-                subgroup INTEGER DEFAULT 0,   -- 0 = общая группа, 1 = первая подгруппа, 2 = вторая
+                subgroup INTEGER DEFAULT 0,
                 FOREIGN KEY (group_id) REFERENCES groups(id)
             );
-
-            -- attendance (отметки посещаемости)
             CREATE TABLE IF NOT EXISTS attendance (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 lesson_id TEXT NOT NULL,
@@ -71,16 +74,46 @@ def init_db():
                 FOREIGN KEY (marked_by) REFERENCES users(id),
                 UNIQUE(lesson_id, student_id)
             );
-""")
-        # Миграция: добавляем столбец subgroup если его нет
+            CREATE TABLE IF NOT EXISTS user_curator_groups (
+                user_id INTEGER NOT NULL,
+                group_id INTEGER NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                FOREIGN KEY (group_id) REFERENCES groups(id),
+                PRIMARY KEY (user_id, group_id)
+            );
+        """)
+        # Миграции: добавляем столбцы если их нет
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN group_id INTEGER REFERENCES groups(id)")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN curator_group_id INTEGER REFERENCES groups(id)")
+        except sqlite3.OperationalError:
+            pass
         try:
             conn.execute("ALTER TABLE students ADD COLUMN subgroup INTEGER DEFAULT 0")
-            print("Добавлен столбец subgroup в таблицу students")
-        except sqlite3.OperationalError as e:
-            if "duplicate column name" not in str(e):
-                raise
-            # Столбец уже существует, это нормально
+        except sqlite3.OperationalError:
             pass
+
+        # Создаём администратора, если нет пользователей
+        cur = conn.execute("SELECT COUNT(*) FROM users")
+        if cur.fetchone()[0] == 0:
+            from werkzeug.security import generate_password_hash
+            admin_hash = generate_password_hash("admin")
+            conn.execute("""
+                INSERT INTO users (username, password_hash, full_name, role)
+                VALUES (?, ?, ?, ?)
+            """, ("admin", admin_hash, "Администратор", "admin"))
+            conn.commit()
+
+def get_user_by_username(username):
+    with get_connection() as conn:
+        cur = conn.execute("SELECT id, username, password_hash, role, group_id, curator_group_id FROM users WHERE username = ?", (username,))
+        row = cur.fetchone()
+        if row:
+            return {"id": row[0], "username": row[1], "password_hash": row[2], "role": row[3], "group_id": row[4], "curator_group_id": row[5]}
+        return None
 
 def upsert_group(code):
     with get_connection() as conn:
@@ -132,3 +165,153 @@ def get_last_processed_file():
         cur = conn.execute("SELECT value FROM metadata WHERE key = 'last_file'")
         row = cur.fetchone()
         return int(row[0]) if row else 0
+
+def get_group_id_by_code(code):
+    """Возвращает id группы по её коду."""
+    with get_connection() as conn:
+        cur = conn.execute("SELECT id FROM groups WHERE code = ?", (code,))
+        row = cur.fetchone()
+        return row[0] if row else None
+
+def get_group_code_by_id(group_id):
+    """Возвращает код группы по её id."""
+    with get_connection() as conn:
+        cur = conn.execute("SELECT code FROM groups WHERE id = ?", (group_id,))
+        row = cur.fetchone()
+        return row[0] if row else None
+
+def add_curator_group(user_id, group_id, conn=None):
+    if conn is None:
+        with get_connection() as conn:
+            conn.execute("INSERT OR IGNORE INTO user_curator_groups (user_id, group_id) VALUES (?, ?)", (user_id, group_id))
+            conn.commit()
+    else:
+        conn.execute("INSERT OR IGNORE INTO user_curator_groups (user_id, group_id) VALUES (?, ?)", (user_id, group_id))
+
+def remove_curator_groups(user_id, conn=None):
+    if conn is None:
+        with get_connection() as conn:
+            conn.execute("DELETE FROM user_curator_groups WHERE user_id = ?", (user_id,))
+            conn.commit()
+    else:
+        conn.execute("DELETE FROM user_curator_groups WHERE user_id = ?", (user_id,))
+
+def get_curator_groups(user_id, conn=None):
+    if conn is None:
+        with get_connection() as conn:
+            cur = conn.execute("SELECT group_id FROM user_curator_groups WHERE user_id = ?", (user_id,))
+            return [row[0] for row in cur.fetchall()]
+    else:
+        cur = conn.execute("SELECT group_id FROM user_curator_groups WHERE user_id = ?", (user_id,))
+        return [row[0] for row in cur.fetchall()]
+    
+def user_has_group_access(user_id, group_code):
+    with get_connection() as conn:
+        cur = conn.execute("SELECT role, group_id FROM users WHERE id = ?", (user_id,))
+        user_row = cur.fetchone()
+        if not user_row:
+            return False
+        role = user_row[0]
+        if role == 'admin':
+            return True
+        elif role == 'headman':
+            group_id = user_row[1]
+            if group_id:
+                cur = conn.execute("SELECT code FROM groups WHERE id = ?", (group_id,))
+                row = cur.fetchone()
+                return row and row[0] == group_code
+            return False
+        elif role == 'curator':
+            # 1. Проверяем, есть ли группа в курируемых
+            cur = conn.execute("""
+                SELECT 1 FROM user_curator_groups ucg
+                JOIN groups g ON ucg.group_id = g.id
+                WHERE ucg.user_id = ? AND g.code = ?
+            """, (user_id, group_code))
+            if cur.fetchone():
+                return True
+            # 2. Проверяем, ведёт ли преподаватель занятия в этой группе
+            cur = conn.execute("""
+                SELECT 1 FROM lessons l
+                JOIN groups g ON l.group_id = g.id
+                WHERE l.teacher_id IN (SELECT id FROM teachers WHERE name IN (SELECT full_name FROM users WHERE id = ?))
+                  AND g.code = ?
+                LIMIT 1
+            """, (user_id, group_code))
+            return cur.fetchone() is not None
+        else:  # teacher
+            cur = conn.execute("""
+                SELECT 1 FROM lessons l
+                JOIN groups g ON l.group_id = g.id
+                WHERE l.teacher_id IN (SELECT id FROM teachers WHERE name IN (SELECT full_name FROM users WHERE id = ?))
+                  AND g.code = ?
+                LIMIT 1
+            """, (user_id, group_code))
+            return cur.fetchone() is not None
+
+def get_available_groups(user_id, role=None, teacher_id=None, conn=None):
+    """Возвращает список кодов групп, доступных пользователю"""
+    close_conn = False
+    if conn is None:
+        conn = get_connection()
+        close_conn = True
+    try:
+        if role is None:
+            cur = conn.execute("SELECT role FROM users WHERE id = ?", (user_id,))
+            role = cur.fetchone()[0]
+
+        groups = []
+        if role == 'admin':
+            cur = conn.execute("SELECT code FROM groups ORDER BY code")
+            groups = [row[0] for row in cur.fetchall()]
+        elif role == 'headman':
+            cur = conn.execute("SELECT group_id FROM users WHERE id = ?", (user_id,))
+            group_id = cur.fetchone()[0]
+            if group_id:
+                cur = conn.execute("SELECT code FROM groups WHERE id = ?", (group_id,))
+                row = cur.fetchone()
+                if row:
+                    groups = [row[0]]
+        elif role == 'curator':
+            # курируемые группы
+            cur = conn.execute("""
+                SELECT g.code FROM user_curator_groups ucg
+                JOIN groups g ON ucg.group_id = g.id
+                WHERE ucg.user_id = ?
+            """, (user_id,))
+            groups = [row[0] for row in cur.fetchall()]
+            # группы, где преподаватель ведёт занятия
+            if teacher_id is None:
+                cur = conn.execute("SELECT full_name FROM users WHERE id = ?", (user_id,))
+                full_name = cur.fetchone()[0]
+                if full_name:
+                    cur = conn.execute("SELECT id FROM teachers WHERE name = ?", (full_name,))
+                    row = cur.fetchone()
+                    teacher_id = row[0] if row else None
+            if teacher_id:
+                cur = conn.execute("""
+                    SELECT DISTINCT g.code FROM lessons l
+                    JOIN groups g ON l.group_id = g.id
+                    WHERE l.teacher_id = ?
+                """, (teacher_id,))
+                groups.extend([row[0] for row in cur.fetchall()])
+            groups = list(set(groups))
+        else:  # teacher
+            if teacher_id is None:
+                cur = conn.execute("SELECT full_name FROM users WHERE id = ?", (user_id,))
+                full_name = cur.fetchone()[0]
+                if full_name:
+                    cur = conn.execute("SELECT id FROM teachers WHERE name = ?", (full_name,))
+                    row = cur.fetchone()
+                    teacher_id = row[0] if row else None
+            if teacher_id:
+                cur = conn.execute("""
+                    SELECT DISTINCT g.code FROM lessons l
+                    JOIN groups g ON l.group_id = g.id
+                    WHERE l.teacher_id = ?
+                """, (teacher_id,))
+                groups = [row[0] for row in cur.fetchall()]
+        return groups
+    finally:
+        if close_conn:
+            conn.close()

@@ -15,11 +15,15 @@ export class CalendarManager {
             locale: 'ru',
             dateFormat: 'd.m.Y',
             defaultDate: this.selectedDate,
-            onChange: (dates) => {
+            onChange: async (dates) => {
                 if (dates.length) {
                     this.selectedDate = dates[0];
                     this.updateDateText();
-                    this.app.refreshSchedule();
+                    try {
+                        await this.app.refreshSchedule();
+                    } catch (err) {
+                        console.error('Error refreshing schedule on date change:', err);
+                    }
                 }
             }
         });

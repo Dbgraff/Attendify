@@ -12,13 +12,12 @@ export class AttendanceManager {
         this.currentLesson = lesson;
 
         const students = this.app.students;
-        // NEW: фильтруем студентов по подгруппе занятия
         let filteredStudents = students;
         if (lesson.podgr === 1) {
             filteredStudents = students.filter(s => s.subgroup === 1);
         } else if (lesson.podgr === 2) {
             filteredStudents = students.filter(s => s.subgroup === 2);
-        } // podgr === 0 – все
+        }
 
         const attendance = await this.app.api.getAttendance(lessonId);
 
@@ -78,15 +77,20 @@ export class AttendanceManager {
 
             const newStatus = (currentStatus === status) ? null : status;
 
+
+            console.debug('[Attendance] Saving:', { lessonId: this.currentLessonId, studentId, newStatus });
             try {
                 await this.app.api.setAttendance(this.currentLessonId, studentId, newStatus);
+                console.debug('[Attendance] Saved, now fetching fresh attendance');
                 const newAttendance = await this.app.api.getAttendance(this.currentLessonId);
+
                 await this.renderAttendanceStats(newAttendance, filteredStudents);
                 await this.renderStudentList(filteredStudents, newAttendance);
-                this.app.refreshSchedule();
+                await this.app.refreshSchedule();
             } catch (err) {
-                console.error('Error saving attendance:', err);
-                this.app.showNotification('Ошибка сохранения', 'error');
+                console.error('[Attendance] Error in marking:', err);
+                console.trace();  // стек вызовов
+                this.app.showNotification(`Ошибка: ${err.message}`, 'error');
             }
         });
     }
