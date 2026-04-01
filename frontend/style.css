@@ -655,3 +655,9 @@ body {
         height: 32px;
     }
 }
+
+.period-buttons .active-period {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+}

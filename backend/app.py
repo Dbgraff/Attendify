@@ -741,13 +741,14 @@ def generate_report():
         if not user_has_group_access(user_id, group_code):
             return jsonify({'error': 'Access denied to this group'}), 403
 
+        # Получаем group_id
         cur = conn.execute("SELECT id FROM groups WHERE code = ?", (group_code,))
         group_row = cur.fetchone()
         if not group_row:
             return jsonify({'error': 'Group not found'}), 404
         group_id = group_row[0]
 
-        # Студенты
+        # Получаем активных студентов с подгруппами
         cur = conn.execute("""
             SELECT id, full_name, subgroup
             FROM students
@@ -756,67 +757,129 @@ def generate_report():
         """, (group_id,))
         students = [{'id': row[0], 'full_name': row[1], 'subgroup': row[2] or 0} for row in cur.fetchall()]
 
-        # Уроки
-        cur = conn.execute("""
-            SELECT id, podgr
-            FROM lessons
-            WHERE group_id = ? AND date BETWEEN ? AND ?
-        """, (group_id, start_date, end_date))
-        lessons = [{'id': row[0], 'podgr': row[1] or 0} for row in cur.fetchall()]
+        if not students:
+            student_data = []
+            total_lessons_count = 0
+            total_students_count = 0
+            total_present = total_late = total_excused = total_absent = 0
+            total_possible = 0
+        else:
+            # Получаем все уроки за период
+            cur = conn.execute("""
+                SELECT id, date, para, podgr, teacher_id, discipline_id, room
+                FROM lessons
+                WHERE group_id = ? AND DATE(date) BETWEEN ? AND ?
+                ORDER BY date, para, podgr
+            """, (group_id, start_date, end_date))
+            lessons = cur.fetchall()
 
-        # Посещаемость
-        if lessons:
-            lesson_ids = [l['id'] for l in lessons]
-            placeholders = ','.join('?' for _ in lesson_ids)
-            cur = conn.execute(f"""
-                SELECT lesson_id, student_id, status
-                FROM attendance
-                WHERE lesson_id IN ({placeholders})
-            """, lesson_ids)
-            attendance = {}
-            for row in cur.fetchall():
-                lesson_id, student_id, status = row
-                attendance.setdefault(student_id, {})[lesson_id] = status
+            # Группируем уроки в логические занятия по ключу (date, para, discipline_id)
+            # Но нужно учитывать, что discipline_id может быть None? Обычно есть. Если None, то тоже группируем.
+            logical_lessons = {}  # key -> {'ids': [], 'podgr_set': set(), 'date':..., 'para':..., 'discipline_id':...}
+            lesson_to_key = {}
+            for row in lessons:
+                key = (row['date'][:10], row['para'], row['discipline_id'])
+                if key not in logical_lessons:
+                    logical_lessons[key] = {
+                        'ids': [],
+                        'podgr_set': set(),
+                        'date': row['date'],
+                        'para': row['para'],
+                        'discipline_id': row['discipline_id']
+                    }
+                logical_lessons[key]['ids'].append(row['id'])
+                podgr = row['podgr'] if row['podgr'] is not None else 0
+                logical_lessons[key]['podgr_set'].add(podgr)
+                lesson_to_key[row['id']] = key
 
-        # Подсчет данных
-        total_possible = 0
-        total_present = total_late = total_excused = total_absent = 0
-        student_data = []
-        for student in students:
-            present = late = excused = absent = 0
-            total_lessons_for_student = 0
-            for lesson in lessons:
-                if lesson['podgr'] != 0 and lesson['podgr'] != student['subgroup']:
-                    continue
-                total_lessons_for_student += 1
-                status = attendance.get(student['id'], {}).get(lesson['id'])
-                if status == 'present':
-                    present += 1
-                elif status == 'late':
-                    late += 1
-                elif status == 'excused':
-                    excused += 1
-                else:
-                    absent += 1
-            percent = (present + late + excused) * 100 / total_lessons_for_student if total_lessons_for_student else 0
-            student_data.append({
-                'full_name': student['full_name'],
-                'subgroup': 'Общая' if student['subgroup'] == 0 else f"{student['subgroup']}-я подгр.",
-                'present': present,
-                'late': late,
-                'excused': excused,
-                'absent': absent,
-                'total': total_lessons_for_student,
-                'percent': round(percent, 1)
-            })
-            total_present += present
-            total_late += late
-            total_excused += excused
-            total_absent += absent
-            total_possible += total_lessons_for_student
+            total_lessons_count = len(logical_lessons)
+            total_students_count = len(students)
 
-        total_lessons_count = len(lessons)
-        total_students_count = len(students)
+            # Получаем все записи посещаемости для этих уроков
+            all_lesson_ids = [lid for group in logical_lessons.values() for lid in group['ids']]
+            attendance_records = []
+            if all_lesson_ids:
+                placeholders = ','.join('?' for _ in all_lesson_ids)
+                cur = conn.execute(f"""
+                    SELECT lesson_id, student_id, status
+                    FROM attendance
+                    WHERE lesson_id IN ({placeholders})
+                """, all_lesson_ids)
+                attendance_records = cur.fetchall()
+
+            # Для каждого студента и логического занятия определим лучший статус
+            status_priority = {'present': 4, 'late': 3, 'excused': 2, 'absent': 1}
+            attendance_map = {}  # (student_id, logical_key) -> priority
+            for lesson_id, student_id, status in attendance_records:
+                logical_key = lesson_to_key.get(lesson_id)
+                if logical_key:
+                    key = (student_id, logical_key)
+                    priority = status_priority.get(status, 0)
+                    if priority > attendance_map.get(key, 0):
+                        attendance_map[key] = priority
+
+            # Для каждого студента считаем статистику
+            student_data = []
+            total_present = total_late = total_excused = total_absent = 0
+            total_possible = 0
+
+            for student in students:
+                student_id = student['id']
+                student_subgroup = student['subgroup']
+                present = late = excused = absent = 0
+                lessons_for_student = 0
+
+                for key, logical in logical_lessons.items():
+                    podgr_set = logical['podgr_set']
+                    # Определяем, участвует ли студент в этом логическом занятии
+                    participates = False
+                    if 0 in podgr_set:
+                        # Общее занятие для всей группы
+                        participates = True
+                    else:
+                        # Занятия по подгруппам
+                        if student_subgroup != 0 and student_subgroup in podgr_set:
+                            participates = True
+                        # Если подгруппа студента 0, но занятие только для подгрупп, то не участвует
+                        # Также может быть ситуация, когда podgr_set пуст? Не должно быть, но на всякий случай.
+                    if not participates:
+                        continue
+
+                    lessons_for_student += 1
+                    status_priority_val = attendance_map.get((student_id, key), 0)
+                    if status_priority_val == 4:
+                        present += 1
+                    elif status_priority_val == 3:
+                        late += 1
+                    elif status_priority_val == 2:
+                        excused += 1
+                    else:
+                        absent += 1
+
+                attended = present + late
+                percent = (attended * 100 / lessons_for_student) if lessons_for_student else 0
+
+                student_data.append({
+                    'full_name': student['full_name'],
+                    'subgroup': 'Общая' if student_subgroup == 0 else f"{student_subgroup}-я подгр.",
+                    'present': present,
+                    'late': late,
+                    'excused': excused,
+                    'absent': absent,
+                    'total': lessons_for_student,
+                    'total_hours': lessons_for_student * 2,
+                    'attended': attended,
+                    'attended_hours': attended * 2,
+                    'percent': round(percent, 1)
+                })
+
+                total_present += present
+                total_late += late
+                total_excused += excused
+                total_absent += absent
+                total_possible += lessons_for_student
+
+            # Здесь total_possible — сумма по студентам количества логических занятий, в которых они участвуют
 
     # Генерация отчета
     try:
@@ -824,25 +887,28 @@ def generate_report():
             excel_data = generate_excel_report(
                 student_data, group_code, start_date, end_date,
                 total_lessons_count, total_students_count,
-                total_present, total_late, total_excused, total_absent, total_possible
+                total_present, total_late, total_excused, total_absent,
+                total_possible, total_possible  # max_possible = total_possible
             )
             filename = f"report_{group_code}_{start_date}_{end_date}.xlsx"
-            mimetype = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-            return send_file(excel_data, download_name=filename, as_attachment=True, mimetype=mimetype)
+            return send_file(excel_data, download_name=filename, as_attachment=True,
+                             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
         elif fmt == 'pdf':
             pdf_data = generate_pdf_report(
                 student_data, group_code, start_date, end_date,
                 total_lessons_count, total_students_count,
-                total_present, total_late, total_excused, total_absent, total_possible
+                total_present, total_late, total_excused, total_absent,
+                total_possible, total_possible
             )
             filename = f"report_{group_code}_{start_date}_{end_date}.pdf"
-            return send_file(pdf_data, download_name=filename, as_attachment=True, mimetype='application/pdf')
+            return send_file(pdf_data, download_name=filename, as_attachment=True,
+                             mimetype='application/pdf')
         else:
             return jsonify({'error': 'Format must be xlsx or pdf'}), 400
     except Exception as e:
         app.logger.error(f"Report generation error: {e}")
         return jsonify({'error': f'Ошибка генерации отчета: {str(e)}'}), 500
-
+    
 # В конце оставляем CORS и запуск
 if __name__ == "__main__":
     init_db()

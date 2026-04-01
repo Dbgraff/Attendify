@@ -62,3 +62,4 @@ htmlcov/
 
 # pytest
 .pytest_cache/
+backend/schedule.db-wal

@@ -250,41 +250,41 @@ export class AttendanceApp {
 
     showReportModal() {
         const modalHtml = `
-            <div class="modal-overlay" id="reportModal">
-                <div class="modal">
-                    <div class="modal-header">
-                        <h2 class="modal-title">Генерация отчета</h2>
-                        <button class="modal-close">&times;</button>
-                    </div>
-                    <div class="modal-body">
-                        <div class="form-group">
-                            <label>Период:</label>
-                            <div class="period-buttons" style="display: flex; gap: 8px; margin-bottom: 12px;">
-                                <button id="periodWeek" class="btn btn-sm btn-outline">Эта неделя</button>
-                                <button id="periodMonth" class="btn btn-sm btn-outline">Этот месяц</button>
-                                <button id="periodCustom" class="btn btn-sm btn-outline">Произвольный</button>
-                            </div>
-                            <div id="customDates" style="display: none;">
-                                <input type="text" id="startDate" placeholder="Начало" class="form-control" readonly>
-                                <input type="text" id="endDate" placeholder="Конец" class="form-control" style="margin-top: 8px;" readonly>
-                            </div>
+        <div class="modal-overlay" id="reportModal">
+            <div class="modal">
+                <div class="modal-header">
+                    <h2 class="modal-title">Генерация отчета</h2>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label>Период:</label>
+                        <div class="period-buttons" style="display: flex; gap: 8px; margin-bottom: 12px;">
+                            <button id="periodWeek" class="btn btn-sm btn-outline active-period">Эта неделя</button>
+                            <button id="periodMonth" class="btn btn-sm btn-outline">Этот месяц</button>
+                            <button id="periodCustom" class="btn btn-sm btn-outline">Произвольный</button>
                         </div>
-                        <div class="form-group">
-                            <label>Формат:</label>
-                            <select id="reportFormat" class="form-control">
-                                <option value="xlsx">Excel (.xlsx)</option>
-                                <option value="pdf">PDF (.pdf)</option>
-                            </select>
+                        <div id="customDates" style="display: none;">
+                            <input type="text" id="startDate" placeholder="Начало" class="form-control" readonly>
+                            <input type="text" id="endDate" placeholder="Конец" class="form-control" style="margin-top: 8px;" readonly>
                         </div>
-                        <div id="reportError" style="color: red; margin-top: 8px;"></div>
                     </div>
-                    <div class="modal-footer">
-                        <button id="generateReportBtn" class="btn btn-primary">Сформировать</button>
-                        <button id="closeReportBtn" class="btn btn-secondary">Отмена</button>
+                    <div class="form-group">
+                        <label>Формат:</label>
+                        <select id="reportFormat" class="form-control">
+                            <option value="xlsx">Excel (.xlsx)</option>
+                            <option value="pdf">PDF (.pdf)</option>
+                        </select>
                     </div>
+                    <div id="reportError" style="color: red; margin-top: 8px;"></div>
+                </div>
+                <div class="modal-footer">
+                    <button id="generateReportBtn" class="btn btn-primary">Сформировать</button>
+                    <button id="closeReportBtn" class="btn btn-secondary">Отмена</button>
                 </div>
             </div>
-        `;
+        </div>
+    `;
 
         const container = document.getElementById('modalsContainer');
         container.innerHTML = modalHtml;
@@ -300,25 +300,25 @@ export class AttendanceApp {
         const endInput = document.getElementById('endDate');
         const customDiv = document.getElementById('customDates');
 
-        // Initialize flatpickr
         const startPicker = flatpickr(startInput, { locale: 'ru', dateFormat: 'd.m.Y' });
         const endPicker = flatpickr(endInput, { locale: 'ru', dateFormat: 'd.m.Y' });
 
-        // Set default week
-        const today = new Date();
-        const firstDayOfWeek = new Date(today);
-        const day = today.getDay();
-        const diffToMonday = (day === 0 ? 6 : day - 1);
-        firstDayOfWeek.setDate(today.getDate() - diffToMonday);
-        const lastDayOfWeek = new Date(firstDayOfWeek);
-        lastDayOfWeek.setDate(firstDayOfWeek.getDate() + 6);
-        startPicker.setDate(firstDayOfWeek);
-        endPicker.setDate(lastDayOfWeek);
+        // Функция для установки активной кнопки
+        const setActivePeriod = (activeId) => {
+            ['periodWeek', 'periodMonth', 'periodCustom'].forEach(id => {
+                const btn = document.getElementById(id);
+                if (id === activeId) {
+                    btn.classList.add('active-period');
+                } else {
+                    btn.classList.remove('active-period');
+                }
+            });
+        };
 
-        // Period buttons
+        // Обработчики периодов
         document.getElementById('periodWeek').addEventListener('click', () => {
+            setActivePeriod('periodWeek');
             customDiv.style.display = 'none';
-            // Calculate current week (Monday to Sunday)
             const today = new Date();
             const firstDay = new Date(today);
             const day = today.getDay();
@@ -329,7 +329,9 @@ export class AttendanceApp {
             startPicker.setDate(firstDay);
             endPicker.setDate(lastDay);
         });
+
         document.getElementById('periodMonth').addEventListener('click', () => {
+            setActivePeriod('periodMonth');
             customDiv.style.display = 'none';
             const today = new Date();
             const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -337,15 +339,29 @@ export class AttendanceApp {
             startPicker.setDate(firstDay);
             endPicker.setDate(lastDay);
         });
+
         document.getElementById('periodCustom').addEventListener('click', () => {
+            setActivePeriod('periodCustom');
             customDiv.style.display = 'block';
-            // Optionally set some default dates
             const today = new Date();
             startPicker.setDate(today);
             endPicker.setDate(today);
         });
 
-        // Generate button
+        // Устанавливаем активной неделю по умолчанию
+        setActivePeriod('periodWeek');
+        // Инициализируем даты недели
+        const today = new Date();
+        const firstDay = new Date(today);
+        const day = today.getDay();
+        const diffToMonday = (day === 0 ? 6 : day - 1);
+        firstDay.setDate(today.getDate() - diffToMonday);
+        const lastDay = new Date(firstDay);
+        lastDay.setDate(firstDay.getDate() + 6);
+        startPicker.setDate(firstDay);
+        endPicker.setDate(lastDay);
+
+        // Generate button (без изменений)
         document.getElementById('generateReportBtn').addEventListener('click', async () => {
             const format = document.getElementById('reportFormat').value;
             let startDate = startInput.value;
@@ -354,7 +370,6 @@ export class AttendanceApp {
                 document.getElementById('reportError').textContent = 'Выберите даты';
                 return;
             }
-            // Convert from dd.mm.yyyy to yyyy-mm-dd
             const parseDate = (d) => {
                 const parts = d.split('.');
                 if (parts.length === 3) {

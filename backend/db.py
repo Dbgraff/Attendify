@@ -3,7 +3,8 @@ import sqlite3
 DB_PATH = "schedule.db"
 
 def get_connection():
-    conn = sqlite3.connect(DB_PATH, timeout=10)   # ждать до 10 сек
+    conn = sqlite3.connect(DB_PATH, timeout=10) 
+    conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     return conn
